@@ -26,8 +26,8 @@ from strategy import (BreakoutConsolidationStrategy, download_data,
 warnings.filterwarnings("ignore")
 
 # ── config ────────────────────────────────────────────────────────────────────
-TICKERS    = ["NVDA", "SMCI", "AXON", "CELH", "CRWD"]
-START      = "2021-01-01"
+TICKERS    = ["NVDA", "AMZN", "TSLA", "AAPL", "CRWD", "AMD", "TPL", "NFLX"]
+START      = "2000-01-01"
 END        = "2024-12-31"
 CASH       = 100_000
 COMM       = 0.001

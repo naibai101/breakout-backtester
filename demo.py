@@ -1,22 +1,20 @@
 """
-demo.py  -  Run the BreakoutConsolidationStrategy on a list of tickers,
-            print a summary table, save individual HTML charts, and
-            generate both per-ticker and combined accuracy report PNGs.
+demo.py  -  Run the BreakoutConsolidationStrategy on a list of tickers
+            using real price data from yfinance.
 
-Usage
------
-1. Add your tickers to the TICKERS list below.
-2. Run:  python demo.py
-3. Per-ticker accuracy PNGs and a combined report will open automatically.
+Outputs per ticker:
+  - {TICKER}_backtest.html         interactive equity curve
+  - {TICKER}_accuracy_report.png   per-ticker accuracy panels
 
-Note: yfinance requires internet access. If running offline, replace
-      download_data() calls with your own OHLCV DataFrames that include
-      a boolean 'BullFlag' column.
+Outputs overall:
+  - combined_accuracy_report.png   combined win rate across all tickers
+  - backtest_summary.csv
 """
 
 import os
 import json
 import warnings
+import yfinance as yf
 import pandas as pd
 import numpy as np
 from backtesting import Backtest
@@ -36,7 +34,7 @@ OUTPUT_DIR = "."          # all output files saved to current folder
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 results_rows   = []
-accuracy_input = []   # list of (ticker, stats) for the combined report
+accuracy_input = []
 
 print(f"\n{'='*70}")
 print(f"  High-Volume Breakout + Consolidation + Weekly Bull Flag Backtester")
@@ -45,22 +43,32 @@ print(f"{'='*70}\n")
 for ticker in TICKERS:
     print(f"Running {ticker} ...", end="  ", flush=True)
     try:
-        data  = download_data(ticker, start=START, end=END)
+        data = download_data(ticker, start=START, end=END)
+
+        if len(data) < 100:
+            print(f"SKIPPED — not enough data returned ({len(data)} bars)")
+            continue
+
         bt    = Backtest(data, BreakoutConsolidationStrategy,
                          cash=CASH, commission=COMM, exclusive_orders=True)
         stats = bt.run()
 
-        # interactive equity-curve chart (open in browser manually)
+        n_trades = int(stats["# Trades"])
+        if n_trades == 0:
+            print("SKIPPED — no trades found for this ticker in the date range")
+            continue
+
+        # interactive equity-curve chart
         html_path = os.path.join(OUTPUT_DIR, f"{ticker}_backtest.html")
         bt.plot(filename=html_path, open_browser=False)
 
-        # per-ticker accuracy PNG (auto-opens in default image viewer)
+        # per-ticker accuracy PNG (auto-opens)
         acc_path = os.path.join(OUTPUT_DIR, f"{ticker}_accuracy_report.png")
         plot_accuracy_report(stats, ticker=ticker, save_path=acc_path)
 
         row = {
             "Ticker"        : ticker,
-            "Trades"        : int(stats["# Trades"]),
+            "Trades"        : n_trades,
             "Win Rate %"    : round(float(stats["Win Rate [%]"]), 1),
             "Return %"      : round(float(stats["Return [%]"]), 2),
             "Max DD %"      : round(float(stats["Max. Drawdown [%]"]), 2),
@@ -71,7 +79,7 @@ for ticker in TICKERS:
         }
         results_rows.append(row)
         accuracy_input.append((ticker, stats))
-        print(f"{row['Trades']} trades | {row['Return %']}% return | {row['Win Rate %']}% win-rate")
+        print(f"{n_trades} trades | {row['Return %']}% return | {row['Win Rate %']}% win-rate")
 
     except Exception as exc:
         print(f"ERROR: {exc}")
@@ -85,13 +93,11 @@ if results_rows:
     print(df.to_string())
 
     df.to_csv(os.path.join(OUTPUT_DIR, "backtest_summary.csv"))
-
     with open(os.path.join(OUTPUT_DIR, "backtest_results.json"), "w") as f:
         json.dump(results_rows, f, indent=2)
 
     print(f"\n  Files saved to: {os.path.abspath(OUTPUT_DIR)}/")
 
-    # combined accuracy report across all tickers (auto-opens)
     if len(accuracy_input) > 1:
         combined_path = os.path.join(OUTPUT_DIR, "combined_accuracy_report.png")
         plot_combined_accuracy_report(accuracy_input, save_path=combined_path)

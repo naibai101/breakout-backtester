@@ -3,12 +3,14 @@ demo.py  -  Run the BreakoutConsolidationStrategy on a list of tickers
             using real price data from yfinance.
 
 Outputs per ticker:
-  - {TICKER}_backtest.html         interactive equity curve
+  - {TICKER}_backtest.html         interactive equity curve (open in browser)
   - {TICKER}_accuracy_report.png   per-ticker accuracy panels
+  - {TICKER}_trades.csv            every trade with entry, exit, return, duration
+                                   and which exit condition fired
 
 Outputs overall:
   - combined_accuracy_report.png   combined win rate across all tickers
-  - backtest_summary.csv
+  - backtest_summary.csv           high-level stats per ticker
 """
 
 import os
@@ -28,8 +30,8 @@ TICKERS    = ["NVDA", "SMCI", "AXON", "CELH", "CRWD"]
 START      = "2021-01-01"
 END        = "2024-12-31"
 CASH       = 100_000
-COMM       = 0.001        # 0.1% commission per trade
-OUTPUT_DIR = "."          # all output files saved to current folder
+COMM       = 0.001
+OUTPUT_DIR = "."
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -41,12 +43,12 @@ print(f"  High-Volume Breakout + Consolidation + Weekly Bull Flag Backtester")
 print(f"{'='*70}\n")
 
 for ticker in TICKERS:
-    print(f"Running {ticker} ...", end="  ", flush=True)
+    print(f"\nRunning {ticker} ...", flush=True)
     try:
         data = download_data(ticker, start=START, end=END)
 
         if len(data) < 100:
-            print(f"SKIPPED — not enough data returned ({len(data)} bars)")
+            print(f"  SKIPPED — not enough data ({len(data)} bars)")
             continue
 
         bt    = Backtest(data, BreakoutConsolidationStrategy,
@@ -55,16 +57,72 @@ for ticker in TICKERS:
 
         n_trades = int(stats["# Trades"])
         if n_trades == 0:
-            print("SKIPPED — no trades found for this ticker in the date range")
+            print("  SKIPPED — no trades found in this date range")
             continue
 
-        # interactive equity-curve chart
+        # ── interactive chart (open in browser to see every trade on the chart)
         html_path = os.path.join(OUTPUT_DIR, f"{ticker}_backtest.html")
         bt.plot(filename=html_path, open_browser=False)
+        print(f"  Chart saved → {ticker}_backtest.html  (open this in your browser)")
 
-        # per-ticker accuracy PNG (auto-opens)
+        # ── accuracy PNG
         acc_path = os.path.join(OUTPUT_DIR, f"{ticker}_accuracy_report.png")
         plot_accuracy_report(stats, ticker=ticker, save_path=acc_path)
+
+        # ── trade-by-trade breakdown ──────────────────────────────────────────
+        trades = stats["_trades"].copy()
+
+        # label which exit condition fired for each trade
+        def label_exit(row):
+            ret = row["ReturnPct"] * 100
+            dur = int(row["Duration"].days) if hasattr(row["Duration"], "days") else int(row["Duration"])
+
+            if dur >= 5:
+                return "⏰ time exit (5d)"
+            if dur == 1 and ret > 0:
+                return "✅ day-1 green exit"
+            if ret <= -3.0:
+                return "🛑 hard stop / trail"
+            if ret < 0 and dur <= 3:
+                return "🚪 no follow-through (3d)"
+            if ret > 0:
+                return "📈 trail / late exit"
+            return "🚪 no follow-through (3d)"
+
+        trades["Exit Reason"] = trades.apply(label_exit, axis=1)
+        trades["Return %"]    = (trades["ReturnPct"] * 100).round(2)
+        trades["Days Held"]   = trades["Duration"].apply(
+            lambda d: d.days if hasattr(d, "days") else int(d)
+        )
+
+        display_cols = ["EntryTime", "ExitTime", "Days Held",
+                        "Return %", "Exit Reason"]
+        display_cols = [c for c in display_cols if c in trades.columns]
+
+        print(f"\n  {'─'*60}")
+        print(f"  {ticker} — {n_trades} trades")
+        print(f"  {'─'*60}")
+        print(trades[display_cols].to_string(index=False))
+
+        # exit reason summary
+        reason_counts = trades["Exit Reason"].value_counts()
+        print(f"\n  Exit breakdown:")
+        for reason, count in reason_counts.items():
+            pct = count / n_trades * 100
+            print(f"    {reason:<30} {count:>3} trades  ({pct:.0f}%)")
+
+        # win/loss by exit type
+        print(f"\n  Avg return by exit type:")
+        for reason in reason_counts.index:
+            avg = trades.loc[trades["Exit Reason"] == reason, "Return %"].mean()
+            print(f"    {reason:<30} avg {avg:+.2f}%")
+
+        print(f"  {'─'*60}")
+
+        # save trades to CSV
+        csv_path = os.path.join(OUTPUT_DIR, f"{ticker}_trades.csv")
+        trades[display_cols + ["Return %", "Exit Reason"]].to_csv(csv_path, index=False)
+        print(f"  Trades saved → {ticker}_trades.csv")
 
         row = {
             "Ticker"        : ticker,
@@ -79,10 +137,9 @@ for ticker in TICKERS:
         }
         results_rows.append(row)
         accuracy_input.append((ticker, stats))
-        print(f"{n_trades} trades | {row['Return %']}% return | {row['Win Rate %']}% win-rate")
 
     except Exception as exc:
-        print(f"ERROR: {exc}")
+        print(f"  ERROR: {exc}")
 
 # ── summary ───────────────────────────────────────────────────────────────────
 if results_rows:

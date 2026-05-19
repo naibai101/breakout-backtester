@@ -40,11 +40,17 @@ CONSOL_BARS         = 8      # ~1.5 weeks of consolidation before considering en
 MIN_HH_HL           = 2      # two confirmed HH + HL — proper structure required
 WEEKLY_EMA_PERIOD   = 10     # weekly EMA for trend filter
 BULL_FLAG_BARS      = 5      # weekly bars to score for flag quality
-RISK_REWARD         = 2.0    # take-profit = entry + RR * risk
-MAX_HOLD_BARS       = 3      # swing trader — max 3 days holding the trade
+MAX_HOLD_BARS       = 5      # hard exit after 5 days no matter what
 MAX_CONSOL_BARS     = 40     # max bars to watch consolidation before giving up
 COOLDOWN_BARS       = 3      # short pause before looking for the next setup
 BULL_FLAG_MIN_SCORE = 3      # minimum score (out of 5) to qualify as a strong bull flag
+
+# ── exit parameters ──────────────────────────────────────────────────────────
+# Day-1 exit: if the stock closes above entry price on day 1, sell — take
+# whatever the day gave (could be +2%, could be +10%).
+# If it doesn't follow through, give it up to FOLLOW_DAYS before cutting.
+TRAIL_PCT           = 0.05   # trailing stop: 5% from the highest close since entry
+FOLLOW_DAYS         = 3      # if stock hasn't closed above entry after this many days, exit
 
 
 def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31"):
@@ -531,10 +537,11 @@ class BreakoutConsolidationStrategy(Strategy):
     vol_avg_window      = VOL_AVG_WINDOW
     consol_bars         = CONSOL_BARS
     min_hh_hl           = MIN_HH_HL
-    risk_reward         = RISK_REWARD
     max_hold_bars       = MAX_HOLD_BARS
     max_consol_bars     = MAX_CONSOL_BARS
     cooldown_bars       = COOLDOWN_BARS
+    trail_pct           = TRAIL_PCT
+    follow_days         = FOLLOW_DAYS
     use_weekly_filter   = True
 
     def init(self):
@@ -559,7 +566,8 @@ class BreakoutConsolidationStrategy(Strategy):
         self._hh_count         = 0
         self._hl_count         = 0
         self._stop_price       = np.nan
-        self._tp_price         = np.nan
+        self._entry_price      = np.nan  # close price at entry
+        self._trail_high       = np.nan  # highest close seen since entry
         self._entry_bar        = -999
         self._in_consol        = False
 
@@ -597,10 +605,35 @@ class BreakoutConsolidationStrategy(Strategy):
         if self.position:
             price     = self.data.Close[-1]
             bars_held = i - self._entry_bar
-            if (price >= self._tp_price or price <= self._stop_price
-                    or bars_held >= self.max_hold_bars):
+
+            # update the trailing high with today's close
+            if np.isnan(self._trail_high) or price > self._trail_high:
+                self._trail_high = price
+
+            # 1. Day-1 exit: if the stock is up at end of the first day, sell.
+            #    Take whatever the day gave — no fixed target, just green = out.
+            hit_day1_exit = (bars_held == 1 and price > self._entry_price)
+
+            # 2. No follow-through: stock hasn't closed above entry after
+            #    FOLLOW_DAYS days — it's not moving, cut it and move on
+            no_follow_through = (bars_held >= self.follow_days
+                                 and price <= self._entry_price)
+
+            # 3. Trailing stop: 5% pullback from the highest close since entry
+            #    — catches a reversal if the stock ran but then turned
+            trail_stop = self._trail_high * (1 - self.trail_pct)
+            hit_trail  = price <= trail_stop
+
+            # 4. Hard stop: price closes below the setup pivot low
+            hit_hard_stop = price <= self._stop_price
+
+            # 5. Hard time exit: 5 days no matter what
+            hit_time = bars_held >= self.max_hold_bars
+
+            if hit_day1_exit or no_follow_through or hit_trail or hit_hard_stop or hit_time:
                 self.position.close()
-                self._last_exit_bar = i   # start cooldown
+                self._last_exit_bar = i
+                self._trail_high    = np.nan
                 self._in_consol     = False
                 self._breakout_bar  = -999
                 self._hh_count      = 0
@@ -644,11 +677,12 @@ class BreakoutConsolidationStrategy(Strategy):
                 and cur_close > self._pivot_high):
             risk = cur_close - self._pivot_low
             if risk > 0:
-                self._stop_price = self._pivot_low
-                self._tp_price   = cur_close + self.risk_reward * risk
-                self._entry_bar  = i
+                self._stop_price  = self._pivot_low
+                self._entry_price = cur_close      # needed for follow-through check
+                self._trail_high  = cur_close      # start trailing from entry close
+                self._entry_bar   = i
                 self.buy()
-                self._in_consol  = False
+                self._in_consol   = False
                 return
 
         # then update swing structure for future bars

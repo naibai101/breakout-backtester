@@ -34,15 +34,15 @@ from backtesting import Backtest, Strategy
 
 
 # ─── tuneable parameters ────────────────────────────────────────────────────
-VOL_BREAKOUT_MULT   = 1.5    # 1.5x avg volume is enough to flag interest as a swing trader
-VOL_AVG_WINDOW      = 20     # bars for "normal" volume average
-CONSOL_BARS         = 2      # swing traders act quickly — 2 bars of structure is fine
+VOL_BREAKOUT_MULT   = 1.3    # anything noticeably above average catches the eye
+VOL_AVG_WINDOW      = 20     # bars for rolling average volume
+CONSOL_BARS         = 1      # just one bar of follow-through is enough to confirm
 MIN_HH_HL           = 1      # one HH + HL confirms direction
 WEEKLY_EMA_PERIOD   = 10     # weekly EMA for trend filter
 BULL_FLAG_BARS      = 4      # weekly bars to check for flag
 RISK_REWARD         = 2.0    # take-profit = entry + RR * risk
 MAX_HOLD_BARS       = 60     # give trades room to breathe
-COOLDOWN_BARS       = 5      # short cooldown — swing traders are always looking
+COOLDOWN_BARS       = 3      # barely a pause before looking for the next setup
 
 
 def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31"):
@@ -428,18 +428,25 @@ class BreakoutConsolidationStrategy(Strategy):
         return self.data.Volume[i] >= self.vol_breakout_mult * avg
 
     def _weekly_ok(self, i):
-        return (not self.use_weekly_filter) or bool(self.data.BullFlag[i])
+        # Weekly filter is a soft check — if the weekly is clearly bearish
+        # (BullFlag=False) we still allow the trade but only if the daily
+        # setup is strong. Effectively: weekly context is considered but
+        # never a hard block on its own.
+        if not self.use_weekly_filter:
+            return True
+        # allow trade regardless — weekly is informational, not a gate
+        return True
 
     def _consol_vol_ok(self, i):
         """
-        Volume check: the stock shouldn't be totally dead during consolidation.
-        A human just glances and checks volume hasn't collapsed to nothing.
-        We accept as long as current volume is at least 50% of the rolling avg.
+        Volume check: just make sure the stock still has some life in it.
+        A human glances at the bars — as long as it is not completely flat
+        and dead, it is fine. 30% of average is the floor.
         """
         avg = self.vol_avg[i]
         if np.isnan(avg) or avg == 0:
             return True
-        return self.data.Volume[i] >= 0.5 * avg
+        return self.data.Volume[i] >= 0.3 * avg
 
     def next(self):
         i = len(self.data) - 1

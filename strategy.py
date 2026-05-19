@@ -34,15 +34,17 @@ from backtesting import Backtest, Strategy
 
 
 # ─── tuneable parameters ────────────────────────────────────────────────────
-VOL_BREAKOUT_MULT   = 1.3    # anything noticeably above average catches the eye
+VOL_BREAKOUT_MULT   = 1.5    # noticeably above average volume to qualify as a breakout
 VOL_AVG_WINDOW      = 20     # bars for rolling average volume
-CONSOL_BARS         = 1      # just one bar of follow-through is enough to confirm
-MIN_HH_HL           = 1      # one HH + HL confirms direction
+CONSOL_BARS         = 8      # ~1.5 weeks of consolidation before considering entry
+MIN_HH_HL           = 2      # two confirmed HH + HL — proper structure required
 WEEKLY_EMA_PERIOD   = 10     # weekly EMA for trend filter
-BULL_FLAG_BARS      = 4      # weekly bars to check for flag
+BULL_FLAG_BARS      = 5      # weekly bars to score for flag quality
 RISK_REWARD         = 2.0    # take-profit = entry + RR * risk
-MAX_HOLD_BARS       = 60     # give trades room to breathe
-COOLDOWN_BARS       = 3      # barely a pause before looking for the next setup
+MAX_HOLD_BARS       = 3      # swing trader — max 3 days holding the trade
+MAX_CONSOL_BARS     = 40     # max bars to watch consolidation before giving up
+COOLDOWN_BARS       = 3      # short pause before looking for the next setup
+BULL_FLAG_MIN_SCORE = 3      # minimum score (out of 5) to qualify as a strong bull flag
 
 
 def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31"):
@@ -69,15 +71,46 @@ def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31
             bull_flag_weekly.append(False)
             continue
 
-        # As a swing trader the main thing on the weekly is:
-        # 1. price above weekly EMA — still in an uptrend
-        in_uptrend = w_close[i] > w_ema[i]
+        # Score the weekly bull flag out of 5 — only strong setups pass.
+        # A human would look at the weekly and ask all five of these:
+        score = 0
 
-        # 2. not in a sharp weekly sell-off (vol not spiking more than 3x avg)
-        #    — if it is, it's a breakdown not a flag
-        vol_ok = np.isnan(w_vol_avg[i]) or w_vol[i] < 3.0 * w_vol_avg[i]
+        # 1. Price above weekly EMA — uptrend is intact (mandatory feel)
+        if w_close[i] > w_ema[i]:
+            score += 1
 
-        bull_flag_weekly.append(in_uptrend and vol_ok)
+        # 2. Price meaningfully above EMA — not just barely (strong trend)
+        if not np.isnan(w_ema[i]) and w_ema[i] > 0:
+            if w_close[i] > w_ema[i] * 1.03:   # at least 3% above EMA
+                score += 1
+
+        # 3. Recent flag: majority of last BULL_FLAG_BARS closes declining
+        #    (the stock is actually pulling back / digesting, not just flat)
+        recent_c = w_close[i - BULL_FLAG_BARS: i + 1]
+        down_bars = sum(recent_c[j] < recent_c[j-1]
+                        for j in range(1, len(recent_c)))
+        if down_bars >= 3:   # at least 3 of 5 weekly bars declining
+            score += 1
+
+        # 4. Volume contracting during the flag — sellers not in control
+        #    compare avg vol in the flag window vs prior 5 weeks
+        flag_vol  = w_vol[i - BULL_FLAG_BARS: i + 1].mean()
+        prior_vol = w_vol[i - BULL_FLAG_BARS - 5: i - BULL_FLAG_BARS].mean()
+        if not np.isnan(prior_vol) and prior_vol > 0:
+            if flag_vol < prior_vol * 0.85:   # flag vol at least 15% lower
+                score += 1
+
+        # 5. Flag didn't give back too much — still holding above 50% of prior move
+        #    (flag is tight / shallow — hallmark of a strong bull flag)
+        prior_low  = w_close[i - BULL_FLAG_BARS - 3: i - BULL_FLAG_BARS].min()
+        prior_high = w_close[i - BULL_FLAG_BARS - 3: i - BULL_FLAG_BARS].max()
+        move = prior_high - prior_low
+        if move > 0:
+            current_retrace = prior_high - w_close[i]
+            if current_retrace < move * 0.50:  # pulled back less than 50%
+                score += 1
+
+        bull_flag_weekly.append(score >= BULL_FLAG_MIN_SCORE)
 
     weekly["BullFlag"] = bull_flag_weekly
     daily["BullFlag"]  = False
@@ -494,14 +527,15 @@ def _open_file(path: str):
 # ─── strategy ────────────────────────────────────────────────────────────────
 
 class BreakoutConsolidationStrategy(Strategy):
-    vol_breakout_mult = VOL_BREAKOUT_MULT
-    vol_avg_window    = VOL_AVG_WINDOW
-    consol_bars       = CONSOL_BARS
-    min_hh_hl         = MIN_HH_HL
-    risk_reward       = RISK_REWARD
-    max_hold_bars     = MAX_HOLD_BARS
-    cooldown_bars     = COOLDOWN_BARS
-    use_weekly_filter = True
+    vol_breakout_mult   = VOL_BREAKOUT_MULT
+    vol_avg_window      = VOL_AVG_WINDOW
+    consol_bars         = CONSOL_BARS
+    min_hh_hl           = MIN_HH_HL
+    risk_reward         = RISK_REWARD
+    max_hold_bars       = MAX_HOLD_BARS
+    max_consol_bars     = MAX_CONSOL_BARS
+    cooldown_bars       = COOLDOWN_BARS
+    use_weekly_filter   = True
 
     def init(self):
         volume = self.data.Volume
@@ -536,14 +570,14 @@ class BreakoutConsolidationStrategy(Strategy):
         return self.data.Volume[i] >= self.vol_breakout_mult * avg
 
     def _weekly_ok(self, i):
-        # Weekly filter is a soft check — if the weekly is clearly bearish
-        # (BullFlag=False) we still allow the trade but only if the daily
-        # setup is strong. Effectively: weekly context is considered but
-        # never a hard block on its own.
+        """
+        Weekly bull flag filter — scored 0-5 in download_data().
+        Only trades where the weekly shows a strong bull flag are taken.
+        Toggle use_weekly_filter = False to bypass entirely.
+        """
         if not self.use_weekly_filter:
             return True
-        # allow trade regardless — weekly is informational, not a gate
-        return True
+        return bool(self.data.BullFlag[i])
 
     def _consol_vol_ok(self, i):
         """
@@ -591,7 +625,7 @@ class BreakoutConsolidationStrategy(Strategy):
 
         # ── consolidation watch ──────────────────────────────────────────────
         bars_since = i - self._breakout_bar
-        if bars_since > self.max_hold_bars:
+        if bars_since > self.max_consol_bars:
             self._in_consol = False
             return
 

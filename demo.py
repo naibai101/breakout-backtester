@@ -1,7 +1,17 @@
 """
 demo.py  -  Run the BreakoutConsolidationStrategy on a list of tickers,
             print a summary table, save individual HTML charts, and
-            generate both per-ticker and combined accuracy reports.
+            generate both per-ticker and combined accuracy report PNGs.
+
+Usage
+-----
+1. Add your tickers to the TICKERS list below.
+2. Run:  python demo.py
+3. Per-ticker accuracy PNGs and a combined report will open automatically.
+
+Note: yfinance requires internet access. If running offline, replace
+      download_data() calls with your own OHLCV DataFrames that include
+      a boolean 'BullFlag' column.
 """
 
 import os
@@ -15,12 +25,13 @@ from strategy import (BreakoutConsolidationStrategy, download_data,
 
 warnings.filterwarnings("ignore")
 
+# ── config ────────────────────────────────────────────────────────────────────
 TICKERS    = ["NVDA", "SMCI", "AXON", "CELH", "CRWD"]
 START      = "2021-01-01"
 END        = "2024-12-31"
 CASH       = 100_000
-COMM       = 0.001       # 0.1% commission
-OUTPUT_DIR = "."         # saves all files to the current folder
+COMM       = 0.001        # 0.1% commission per trade
+OUTPUT_DIR = "."          # all output files saved to current folder
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -39,11 +50,11 @@ for ticker in TICKERS:
                          cash=CASH, commission=COMM, exclusive_orders=True)
         stats = bt.run()
 
-        # interactive equity-curve chart
+        # interactive equity-curve chart (open in browser manually)
         html_path = os.path.join(OUTPUT_DIR, f"{ticker}_backtest.html")
         bt.plot(filename=html_path, open_browser=False)
 
-        # per-ticker accuracy report (saved as PNG, auto-opens)
+        # per-ticker accuracy PNG (auto-opens in default image viewer)
         acc_path = os.path.join(OUTPUT_DIR, f"{ticker}_accuracy_report.png")
         plot_accuracy_report(stats, ticker=ticker, save_path=acc_path)
 
@@ -65,7 +76,7 @@ for ticker in TICKERS:
     except Exception as exc:
         print(f"ERROR: {exc}")
 
-# ── Summary table ─────────────────────────────────────────────────────────────
+# ── summary ───────────────────────────────────────────────────────────────────
 if results_rows:
     df = pd.DataFrame(results_rows).set_index("Ticker")
     print(f"\n{'='*70}")
@@ -74,12 +85,17 @@ if results_rows:
     print(df.to_string())
 
     df.to_csv(os.path.join(OUTPUT_DIR, "backtest_summary.csv"))
+
     with open(os.path.join(OUTPUT_DIR, "backtest_results.json"), "w") as f:
         json.dump(results_rows, f, indent=2)
 
-    # combined accuracy report across all tickers (saved + auto-opens)
+    print(f"\n  Files saved to: {os.path.abspath(OUTPUT_DIR)}/")
+
+    # combined accuracy report across all tickers (auto-opens)
     if len(accuracy_input) > 1:
         combined_path = os.path.join(OUTPUT_DIR, "combined_accuracy_report.png")
         plot_combined_accuracy_report(accuracy_input, save_path=combined_path)
+else:
+    print("\n  No results — check your tickers and internet connection.")
 
 print(f"\n{'='*70}\n")

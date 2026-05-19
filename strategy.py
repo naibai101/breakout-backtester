@@ -34,14 +34,15 @@ from backtesting import Backtest, Strategy
 
 
 # ─── tuneable parameters ────────────────────────────────────────────────────
-VOL_BREAKOUT_MULT   = 2.0    # volume spike threshold vs rolling avg
+VOL_BREAKOUT_MULT   = 1.5    # 1.5x avg volume is enough to flag interest as a swing trader
 VOL_AVG_WINDOW      = 20     # bars for "normal" volume average
-CONSOL_BARS         = 5      # minimum consolidation bars before entry
-MIN_HH_HL           = 2      # minimum higher-high / higher-low legs
+CONSOL_BARS         = 2      # swing traders act quickly — 2 bars of structure is fine
+MIN_HH_HL           = 1      # one HH + HL confirms direction
 WEEKLY_EMA_PERIOD   = 10     # weekly EMA for trend filter
 BULL_FLAG_BARS      = 4      # weekly bars to check for flag
 RISK_REWARD         = 2.0    # take-profit = entry + RR * risk
-MAX_HOLD_BARS       = 40     # force-exit if trade lingers too long
+MAX_HOLD_BARS       = 60     # give trades room to breathe
+COOLDOWN_BARS       = 5      # short cooldown — swing traders are always looking
 
 
 def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31"):
@@ -68,21 +69,15 @@ def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31
             bull_flag_weekly.append(False)
             continue
 
-        # 1. price in uptrend
+        # As a swing trader the main thing on the weekly is:
+        # 1. price above weekly EMA — still in an uptrend
         in_uptrend = w_close[i] > w_ema[i]
 
-        # 2. at least 2 of the last BULL_FLAG_BARS closes are declining
-        #    (relaxed — does not require every bar to decline)
-        recent_c   = w_close[i - BULL_FLAG_BARS: i + 1]
-        down_count = sum(
-            recent_c[j] < recent_c[j - 1] for j in range(1, len(recent_c))
-        )
-        flag_pullback = down_count >= 2
+        # 2. not in a sharp weekly sell-off (vol not spiking more than 3x avg)
+        #    — if it is, it's a breakdown not a flag
+        vol_ok = np.isnan(w_vol_avg[i]) or w_vol[i] < 3.0 * w_vol_avg[i]
 
-        # 3. current weekly volume below its 10-week average (contraction)
-        vol_contracting = (not np.isnan(w_vol_avg[i])) and w_vol[i] < w_vol_avg[i]
-
-        bull_flag_weekly.append(in_uptrend and flag_pullback and vol_contracting)
+        bull_flag_weekly.append(in_uptrend and vol_ok)
 
     weekly["BullFlag"] = bull_flag_weekly
     daily["BullFlag"]  = False
@@ -397,6 +392,7 @@ class BreakoutConsolidationStrategy(Strategy):
     min_hh_hl         = MIN_HH_HL
     risk_reward       = RISK_REWARD
     max_hold_bars     = MAX_HOLD_BARS
+    cooldown_bars     = COOLDOWN_BARS
     use_weekly_filter = True
 
     def init(self):
@@ -413,9 +409,9 @@ class BreakoutConsolidationStrategy(Strategy):
         self.vol_avg = self.I(vol_avg_fn, volume, name="Vol SMA")
 
         self._breakout_bar     = -999
-        self._pre_break_vol    = np.nan   # avg volume BEFORE breakout
-        self._pivot_high       = np.nan   # latest swing high (updates with HH)
-        self._pivot_low        = np.nan   # latest swing low  (updates with HL)
+        self._last_exit_bar    = -999  # cooldown: bar index of the last trade exit
+        self._pivot_high       = np.nan
+        self._pivot_low        = np.nan
         self._prev_high        = np.nan
         self._prev_low         = np.nan
         self._hh_count         = 0
@@ -436,16 +432,14 @@ class BreakoutConsolidationStrategy(Strategy):
 
     def _consol_vol_ok(self, i):
         """
-        Average volume over the consolidation window must be above
-        the pre-breakout average — confirms accumulation is continuing.
+        Volume check: the stock shouldn't be totally dead during consolidation.
+        A human just glances and checks volume hasn't collapsed to nothing.
+        We accept as long as current volume is at least 50% of the rolling avg.
         """
-        bars_since = i - self._breakout_bar
-        if bars_since < 1 or np.isnan(self._pre_break_vol):
+        avg = self.vol_avg[i]
+        if np.isnan(avg) or avg == 0:
             return True
-        start = self._breakout_bar
-        end   = i + 1
-        consol_vol = np.mean(self.data.Volume[start:end])
-        return consol_vol >= self._pre_break_vol
+        return self.data.Volume[i] >= 0.5 * avg
 
     def next(self):
         i = len(self.data) - 1
@@ -457,15 +451,19 @@ class BreakoutConsolidationStrategy(Strategy):
             if (price >= self._tp_price or price <= self._stop_price
                     or bars_held >= self.max_hold_bars):
                 self.position.close()
-                self._in_consol    = False
-                self._breakout_bar = -999
-                self._hh_count     = 0
-                self._hl_count     = 0
+                self._last_exit_bar = i   # start cooldown
+                self._in_consol     = False
+                self._breakout_bar  = -999
+                self._hh_count      = 0
+                self._hl_count      = 0
             return
 
         # ── look for a volume breakout ────────────────────────────────────────
+        # respect cooldown: give the market time to reset after each trade
+        in_cooldown = (i - self._last_exit_bar) < self.cooldown_bars
+
         if not self._in_consol:
-            if self._is_vol_breakout(i) and self._weekly_ok(i):
+            if not in_cooldown and self._is_vol_breakout(i) and self._weekly_ok(i):
                 self._breakout_bar  = i
                 self._in_consol     = True
                 self._pivot_high    = self.data.High[-1]
@@ -474,9 +472,6 @@ class BreakoutConsolidationStrategy(Strategy):
                 self._prev_low      = self.data.Low[-1]
                 self._hh_count      = 0
                 self._hl_count      = 0
-                # record avg volume in the window leading up to the breakout
-                start = max(0, i - self.vol_avg_window)
-                self._pre_break_vol = float(np.mean(self.data.Volume[start:i]))
             return
 
         # ── consolidation watch ──────────────────────────────────────────────

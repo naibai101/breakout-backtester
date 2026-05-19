@@ -466,19 +466,27 @@ class BreakoutConsolidationStrategy(Strategy):
 
     def init(self):
         volume = self.data.Volume
+        window = self.vol_avg_window
 
-        self.vol_avg = self.I(talib.SMA, volume, self.vol_avg_window,
-                              name="Vol SMA")
+        def vol_avg_fn(vol):
+            """Rolling SMA of volume in pure numpy."""
+            vol = np.asarray(vol, dtype=float)
+            out = np.full(len(vol), np.nan)
+            for i in range(window - 1, len(vol)):
+                out[i] = vol[i - window + 1: i + 1].mean()
+            return out
 
-        def vol_slope(vol):
-            sma   = talib.SMA(vol, self.vol_avg_window)
-            slope = np.full_like(sma, np.nan)
-            for i in range(5, len(sma)):
-                if not (np.isnan(sma[i]) or np.isnan(sma[i - 5])):
-                    slope[i] = sma[i] - sma[i - 5]
+        def vol_slope_fn(vol):
+            """5-bar slope of the volume SMA."""
+            s     = vol_avg_fn(vol)
+            slope = np.full(len(s), np.nan)
+            for i in range(5, len(s)):
+                if not (np.isnan(s[i]) or np.isnan(s[i - 5])):
+                    slope[i] = s[i] - s[i - 5]
             return slope
 
-        self.vol_slope = self.I(vol_slope, volume, name="Vol Slope")
+        self.vol_avg   = self.I(vol_avg_fn,   volume, name="Vol SMA")
+        self.vol_slope = self.I(vol_slope_fn, volume, name="Vol Slope")
 
         self._breakout_bar       = -999
         self._entry_pivot_high   = np.nan

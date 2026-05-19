@@ -227,11 +227,17 @@ def plot_accuracy_report(stats, ticker: str = "", save_path: str = None):
                  transform=ax4.transAxes, ha="right", va="top",
                  color=ROLL_C, fontsize=9, fontweight="bold")
 
-    if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=BG)
-        print(f"Accuracy report saved → {save_path}")
+    if save_path is None:
+        save_path = f"accuracy_report{'_' + ticker if ticker else ''}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=BG)
+    print(f"Accuracy report saved → {save_path}")
+    import subprocess, sys, os
+    if sys.platform == "win32":
+        os.startfile(save_path)
+    elif sys.platform == "darwin":
+        subprocess.call(["open", save_path])
     else:
-        plt.show()
+        subprocess.call(["xdg-open", save_path])
 
     return fig
 
@@ -432,11 +438,17 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
                  transform=ax6.transAxes, ha="right", va="top",
                  color=ROLL_C, fontsize=9, fontweight="bold")
 
-    if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=BG)
-        print(f"Combined accuracy report saved → {save_path}")
+    if save_path is None:
+        save_path = "combined_accuracy_report.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=BG)
+    print(f"Combined accuracy report saved → {save_path}")
+    import subprocess, sys, os
+    if sys.platform == "win32":
+        os.startfile(save_path)
+    elif sys.platform == "darwin":
+        subprocess.call(["open", save_path])
     else:
-        plt.show()
+        subprocess.call(["xdg-open", save_path])
 
     return fig
 

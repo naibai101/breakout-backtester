@@ -49,7 +49,7 @@ BULL_FLAG_MIN_SCORE = 3      # minimum score (out of 5) to qualify as a strong b
 # Day-1 exit: if the stock closes above entry price on day 1, sell — take
 # whatever the day gave (could be +2%, could be +10%).
 # If it doesn't follow through, give it up to FOLLOW_DAYS before cutting.
-TRAIL_PCT           = 0.02   # trailing stop: 2% from the highest close since entry
+TRAIL_PCT           = 0.05   # trailing stop: 5% from the highest close since entry
 FOLLOW_DAYS         = 3      # if stock hasn't closed above entry after this many days, exit
 
 

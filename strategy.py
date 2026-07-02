@@ -137,18 +137,19 @@ def download_data(ticker: str, start: str = "2020-01-01", end: str = "2024-12-31
 
 def _palette():
     return dict(
-        BG      = "#FFF0F5",   # soft pink background
-        PANEL   = "#FFF8FB",   # slightly lighter pink panels
-        GRID    = "#F5DCE8",   # dusty rose grid
-        BORDER  = "#F0C0D8",   # pink panel border
-        TEXT    = "#4A2040",   # deep plum — readable on pink
-        MUTED   = "#B07898",   # muted mauve labels
-        WIN_C   = "#7DC98A",   # pastel green  ✓
-        LOSS_C  = "#F08080",   # pastel red    ✗
-        LINE_C  = "#C06090",   # deep rose line
-        ROLL_C  = "#9B72B0",   # soft purple
-        PALETTE = ["#7DC98A","#F08080","#85C1E9","#F9C85A",
-                   "#C39BD3","#F0A06A","#76D7C4","#F1948A"],
+        BG      = "#0C0305",   # jet black background — Rin's night
+        PANEL   = "#170609",   # deep crimson-black panels
+        GRID    = "#3A1216",   # dim crimson grid
+        BORDER  = "#7A2530",   # muted crimson border
+        TEXT    = "#FFE4E4",   # soft blush white — readable on black
+        MUTED   = "#C98A90",   # dusty rose-grey labels
+        WIN_C   = "#5BA3D4",   # teal-blue — Rin's eyes  ✓
+        LOSS_C  = "#EF4444",   # crimson red — her signature  ✗
+        LINE_C  = "#B91C1C",   # deep crimson line
+        ROLL_C  = "#C4D0E8",   # silver — her metallic trim
+        SILVER  = "#C4D0E8",   # silver edges/trim accents
+        PALETTE = ["#5BA3D4","#EF4444","#C4D0E8","#B91C1C",
+                   "#FCA5A5","#3A7CA5","#8A1C1C","#DCE6F4"],
     )
 
 def _style_ax(ax, title, p):
@@ -164,11 +165,11 @@ def _style_ax(ax, title, p):
     ax.set_axisbelow(True)
 
 def _stat_box(ax, x, y, text, color, p, fontsize=11):
-    """Draw a small rounded stat label with a white backing box."""
+    """Draw a small rounded stat label with a dark silver-trimmed backing box."""
     ax.text(x, y, text, transform=ax.transAxes,
             ha="center", va="center", color=color,
             fontsize=fontsize, fontweight="bold",
-            bbox=dict(facecolor="white", edgecolor=p["BORDER"],
+            bbox=dict(facecolor=p["PANEL"], edgecolor=p["SILVER"],
                       boxstyle="round,pad=0.4", linewidth=1.2,
                       alpha=0.92))
 
@@ -216,7 +217,7 @@ def plot_accuracy_report(stats, ticker: str = "", save_path: str = None):
                              f"avg P&L  {avg_pnl:+.2f}%"]):
         fig.text(xpos, pill_y, label, ha="center", va="top",
                  color=p["MUTED"], fontsize=9,
-                 bbox=dict(facecolor="white", edgecolor=p["BORDER"],
+                 bbox=dict(facecolor=p["PANEL"], edgecolor=p["SILVER"],
                            boxstyle="round,pad=0.35", linewidth=1,
                            alpha=0.85))
 
@@ -231,19 +232,19 @@ def plot_accuracy_report(stats, ticker: str = "", save_path: str = None):
 
     b1 = ax1.bar([0, 1], [n_wins, n_losses],
                  color=[p["WIN_C"], p["LOSS_C"]],
-                 width=0.5, zorder=3, edgecolor="white", linewidth=1.5)
+                 width=0.5, zorder=3, edgecolor=p["SILVER"], linewidth=1.5)
     ax1.set_xticks([0, 1])
     ax1.set_xticklabels(["Wins ✓", "Losses ✗"], color=p["TEXT"], fontsize=9)
     ax1.set_ylabel("count")
 
     # bar count labels — inside the top of each bar to avoid collision
-    for bar, val, col in zip(b1, [n_wins, n_losses], ["white", "white"]):
+    for bar, val, col in zip(b1, [n_wins, n_losses], [p["TEXT"], p["TEXT"]]):
         h = bar.get_height()
         if h > 0:
             ax1.text(bar.get_x() + bar.get_width() / 2,
                      h * 0.5,           # middle of bar
                      str(val), ha="center", va="center",
-                     color="white", fontsize=13, fontweight="bold")
+                     color=p["TEXT"], fontsize=13, fontweight="bold")
 
     # win rate — below the chart title, above bars, in its own box
     badge_c = p["WIN_C"] if overall_wr >= 50 else p["LOSS_C"]
@@ -274,7 +275,7 @@ def plot_accuracy_report(stats, ticker: str = "", save_path: str = None):
     _style_ax(ax3, "per-trade return %", p)
     ax3.bar(trade_nums, pnl_pct,
             color=[p["WIN_C"] if v > 0 else p["LOSS_C"] for v in pnl_pct],
-            zorder=3, edgecolor="white", linewidth=0.4)
+            zorder=3, edgecolor=p["SILVER"], linewidth=0.4)
     ax3.axhline(0, color=p["MUTED"], linewidth=0.8)
     ax3.axhline(avg_pnl, color=p["LINE_C"],
                 linewidth=1.5, linestyle="--", zorder=4)
@@ -372,7 +373,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
     for xpos, label in zip([0.18, 0.38, 0.60, 0.80], pill_labels):
         fig.text(xpos, 0.943, label, ha="center", va="top",
                  color=p["MUTED"], fontsize=9,
-                 bbox=dict(facecolor="white", edgecolor=p["BORDER"],
+                 bbox=dict(facecolor=p["PANEL"], edgecolor=p["SILVER"],
                            boxstyle="round,pad=0.35", linewidth=1,
                            alpha=0.85))
 
@@ -386,7 +387,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
     _style_ax(ax1, "win rate by ticker", p)
     bar_cols = [p["WIN_C"] if v >= 50 else p["LOSS_C"] for v in t_values]
     b1 = ax1.bar(range(len(t_labels)), t_values, color=bar_cols,
-                 width=0.5, zorder=3, edgecolor="white", linewidth=1.5)
+                 width=0.5, zorder=3, edgecolor=p["SILVER"], linewidth=1.5)
     ax1.set_xticks(range(len(t_labels)))
     ax1.set_xticklabels(t_labels, color=p["TEXT"], fontsize=8)
     # counts inside bars
@@ -395,7 +396,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
         if h > 8:
             ax1.text(bar.get_x() + bar.get_width() / 2, h * 0.5,
                      f"{val:.0f}%", ha="center", va="center",
-                     color="white", fontsize=10, fontweight="bold")
+                     color=p["TEXT"], fontsize=10, fontweight="bold")
     ax1.axhline(50, color=p["MUTED"], linewidth=1, linestyle="--", alpha=0.5)
     ax1.set_ylim(0, 130)
     ax1.set_ylabel("win rate %")
@@ -411,7 +412,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
     counts = combined.groupby("ticker").size().reindex(t_labels).values
     b2 = ax2.bar(range(len(t_labels)), counts,
                  color=p["PALETTE"][:len(t_labels)],
-                 width=0.5, zorder=3, edgecolor="white", linewidth=1.5)
+                 width=0.5, zorder=3, edgecolor=p["SILVER"], linewidth=1.5)
     ax2.set_xticks(range(len(t_labels)))
     ax2.set_xticklabels(t_labels, color=p["TEXT"], fontsize=8)
     for bar, val in zip(b2, counts):
@@ -419,7 +420,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
         if h > 0:
             ax2.text(bar.get_x() + bar.get_width() / 2, h * 0.5,
                      str(val), ha="center", va="center",
-                     color="white", fontsize=11, fontweight="bold")
+                     color=p["TEXT"], fontsize=11, fontweight="bold")
     ax2.set_ylim(0, max(counts) * 1.20)
     ax2.set_ylabel("# trades")
 
@@ -429,7 +430,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
     avg_pnls = combined.groupby("ticker")["pnl"].mean().reindex(t_labels).values
     b3 = ax3.bar(range(len(t_labels)), avg_pnls,
                  color=[p["WIN_C"] if v >= 0 else p["LOSS_C"] for v in avg_pnls],
-                 width=0.5, zorder=3, edgecolor="white", linewidth=1.5)
+                 width=0.5, zorder=3, edgecolor=p["SILVER"], linewidth=1.5)
     ax3.set_xticks(range(len(t_labels)))
     ax3.set_xticklabels(t_labels, color=p["TEXT"], fontsize=8)
     # labels inside bars
@@ -438,7 +439,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
         mid = h / 2 if abs(h) > 0.5 else (0.3 if h >= 0 else -0.3)
         ax3.text(bar.get_x() + bar.get_width() / 2, mid,
                  f"{val:+.1f}%", ha="center", va="center",
-                 color="white", fontsize=9, fontweight="bold")
+                 color=p["TEXT"], fontsize=9, fontweight="bold")
     ax3.axhline(0, color=p["MUTED"], linewidth=0.8)
     spread = max(abs(avg_pnls.min()), abs(avg_pnls.max()), 0.5)
     ax3.set_ylim(-spread * 1.6, spread * 1.6)
@@ -471,7 +472,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
         ax5.bar(trade_nums[mask], pnl_all[mask],
                 color=p["PALETTE"][idx % len(p["PALETTE"])],
                 label=t, zorder=3, alpha=0.9,
-                edgecolor="white", linewidth=0.3)
+                edgecolor=p["SILVER"], linewidth=0.3)
     ax5.axhline(0, color=p["MUTED"], linewidth=0.8)
     ax5.axhline(avg_all, color=p["LINE_C"],
                 linewidth=1.5, linestyle="--", zorder=4)
@@ -480,7 +481,7 @@ def plot_combined_accuracy_report(results: list, save_path: str = None):
     _stat_box(ax5, 0.15, 0.92, f"avg {avg_all:+.2f}%",
               p["LINE_C"], p, fontsize=9)
     leg = ax5.legend(fontsize=7, loc="lower right", framealpha=0.9,
-                     facecolor="white", edgecolor=p["BORDER"],
+                     facecolor=p["PANEL"], edgecolor=p["SILVER"],
                      ncol=min(len(t_labels), 3))
     for txt in leg.get_texts():
         txt.set_color(p["TEXT"])
